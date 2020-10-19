@@ -1,0 +1,351 @@
+// The new order handler finds existing quotes whose names match the Quote string on a new order 
+// imported from our EDI provider. 
+// The findQuote and findRep methods are called from a before insert trigger. The methods look for 
+// matching quotes and parter reps respectively. If a matching partner rep is not found the newRep 
+// method is called from an after insert trigger and the new contact record is created.
+// 
+// If we change to six-digit quote numbers, we will have to change line 35. 
+// Quotes generated in the test environment have one more digit than production numbers.
+
+public class newOrderHandler{
+    public static void findQuote(List<Order> orders){
+        for (Order o : orders){
+            
+            // Look for duplicate PO numbers on orders
+            List<Order>queryOrder = [SELECT id, OrderNumber, PoNumber, TotalAmount
+                                     FROM Order
+                                     WHERE PoNumber = :o.PoNumber];
+            
+            if(queryOrder.size() > 0 && o.PoNumber != null){
+                String errSub0 = 'Duplicate Order Found';
+                String errBod0 = errSub0 +' for PO ' + o.PoNumber + 
+                    ' <http://goguardian.my.salesforce.com/' + queryorder[0].id +'>';
+                o.status='Canceled';
+                o.Description = errBod0;
+                errorHandler(o, True, errSub0, errBod0);
+                continue;
+            }
+            
+            String quoteStr = o.Quote__c;
+            if(quoteStr == Null){
+                String errSub0 = 'Please reply with valid quote number';
+                String errMsg0 = 'Purchase Order number '+o.PoNumber+' is missing a quote reference number.\n'+
+                    'Please reply with a valid quote reference number.';
+                errorhandler(o,False,errSub0,errMsg0);
+            }
+            
+            else{
+                System.debug('quoteStr: ' + quoteStr);
+                // Parse the quote number from the Quote number string
+                try{
+                    Integer ind = quoteStr.indexOf('Q-');
+                    
+                    if(ind == -1){
+                        Integer pLInd = quoteStr.indexOf('PL-');
+                        if(pLind != -1){
+                            System.debug('Pricing Letter: '+quoteStr);
+                        }
+                        Integer indEnd = Test.isRunningTest() ? 9 : 8;
+                        String prLetterNum = quoteStr.substring(pLInd,indEnd);
+                        
+                        Pricing_Letter__c prLetter = [SELECT Account__r.OwnerId FROM Pricing_Letter__c WHERE Name = :prLetterNum LIMIT 1];
+                        
+                        o.OwnerId = prLetter.Account__r.OwnerId;
+                    }
+                    
+                    else{
+                        
+                        Integer indEnd = 8;
+                        
+                        String quoteNum = quoteStr.substring(ind, ind+indEnd);
+                        
+                        System.debug('quoteStr: ' + quoteStr);
+                        
+                        // Query for the quote Id with the quote number provided by the partner                
+                        SBQQ__Quote__c quote = [SELECT Id, SBQQ__Opportunity2__c, Name 
+                                                FROM SBQQ__Quote__c 
+                                                WHERE Name = :quoteNum LIMIT 1];
+                        
+                        System.debug('queried quote: ' + quote);
+                        
+                        // Check for orders with the same quote number 
+                        String queryStr = 'SELECT Id, PoNumber FROM Order WHERE Quote__c LIKE \'%'+quoteNum+'%\'';
+                        
+                        system.debug(queryStr);
+                        
+                        List<Order> dupeOrder = Database.query(queryStr);
+                        
+                        system.debug('dupeOrder: '+dupeOrder);
+                        if(dupeOrder.size() > 0){
+                            String errSub1 = 'Please reply with valid quote number';
+                            String errMsg1 = 'An order already exists for GoGuardian Quote ' + quoteNum + 
+                                ' with PO Number ' + dupeOrder[0].PoNumber +'.\nPlease reply to this '+
+                                'email with a valid quote number for PO '+ o.PoNumber +'.';
+                            errorhandler(o,False,errSub1,errMsg1);
+                            continue;
+                        }
+                        
+                        // If the query returns null then this assignment will trigger the catch
+                        o.SBQQ__Quote__c = quote.Id;
+                        o.OpportunityId = quote.SBQQ__Opportunity2__c;
+                        
+                        //run method to chedk order to match quote lines to create sales invoice in Intacct
+                        checkOrderMatch(o);
+                        
+                        
+                        
+                        System.debug('End of try segment');
+                    }
+                }
+                
+                // If there is no 'Q-' or if the quote can't be found, this catch handles error
+                catch(Exception err){
+                    String errSub2 = 'Please reply with valid quote number';
+                    String errMsg2 = 'A GoGuardian quote was not found for PO# '+ o.PoNumber + ' with quote # ' +
+                        quoteStr + '.\nPlease reply to this email with a valid quote number.';
+                    errorhandler(o,False,errSub2,errMsg2);
+                    
+                }  
+            }
+        }
+    }
+    
+    
+    public static void findRep(List<Order> orders){       
+        for (Order o : orders){
+            if(o.PartnerRep_Email__c != null){
+                
+                //Search contacts for an existing contact
+                List<Contact> rep = [SELECT Id, Name 
+                                     FROM Contact 
+                                     WHERE Email = :o.PartnerRep_Email__c LIMIT 1];
+                if (rep.size()==1){
+                    o.Partner_Rep__c = rep[0].Id;
+                }
+            }
+            if(o.Drop_Ship_Email__c != null){
+                
+                //Search contacts for an existing contact
+                List<Contact> dsCont = [SELECT Id, Name 
+                                        FROM Contact 
+                                        WHERE Email = :o.Drop_Ship_Email__c LIMIT 1];
+                if (dsCont.size()==1){
+                    o.Drop_Ship_Contact__c = dsCont[0].Id;
+                }
+            }
+        }
+    }
+    
+    public static void newRep(List<Order> orders){
+        
+        for (Order o : orders){
+            if (o.Partner_Rep__c == null && o.PartnerRep_Email__c != null && o.PartnerRep_Name__c != null){
+                
+                String[] name = o.PartnerRep_Name__c.split(' ');
+                Contact addContact = new Contact(FirstName = name[0], 
+                                                 LastName = name[name.size()-1], 
+                                                 Email = o.PartnerRep_Email__c);
+                
+                if (o.Reseller_from_Quote__c != null){
+                    addContact.AccountId = o.Reseller_from_Quote__c;
+                }
+                
+                try{
+                    insert addContact;
+                    Order ord = [SELECT Id FROM Order WHERE Id = :o.Id LIMIT 1];
+                    ord.Partner_Rep__c = addContact.Id;
+                    update ord;
+                }
+                catch(Exception e){
+                    String sub3 = 'Exception Thrown - Adding Partner Contact';
+                    String body3 = 'Exception thrown adding partner contact to Order with Id ' + o.Id;
+                    errorHandler(o,True,sub3,body3);
+                }
+            }
+            if (o.Drop_Ship_Contact__c == null && o.Drop_Ship_Name__c != null && o.Drop_Ship_Email__c != null){
+                String[] name = o.Drop_Ship_Name__c.split(' ');
+                Contact addContact = new Contact(FirstName = name[0], 
+                                                 LastName = name[name.size()-1], 
+                                                 Email = o.Drop_Ship_Email__c);
+                
+                if (o.Reseller_from_Quote__c != null){
+                    addContact.AccountId = o.Reseller_from_Quote__c;
+                }
+                
+                try{
+                    insert addContact;
+                    Order ord = [SELECT Id FROM Order WHERE Id = :o.Id LIMIT 1];
+                    ord.Drop_Ship_Contact__c = addContact.Id;
+                    update ord;
+                }
+                catch(Exception e){
+                    String sub4 = 'Exception Thrown - Adding Partner Contact';
+                    String body4 = 'Exception thrown adding partner contact to Order with Id ' + o.Id + 'Message: ' + e.getMessage() + 'Stack Trace: ' + e.getStackTraceString();
+                    errorHandler(o,True,sub4,body4);
+                }
+            }
+        }        
+    }
+    
+    public static void errorHandler(Order o, Boolean isInternal, String sub, String body){
+        
+        List<String> errorEmailList = new List<String>{'salesops@goguardian.com'};
+            Messaging.SingleEmailMessage msg = new Messaging.SingleEmailMessage();
+        if (isInternal == False && Test.isRunningTest() == False){
+            errorEmailList.add('reseller@goguardian.com');
+            /*
+if (o.AccountId == '0014100000BCpaG'){
+body = 'Attn: ' + (o.Drop_Ship_Name__c == Null ? '' : o.Drop_Ship_Name__c) + 
+',\n\n' + body + '\n\n GoGuardian Sales Operations';                
+if (o.Drop_Ship_Email__c != null){
+errorEmailList.add(o.Drop_Ship_Email__c);
+}
+}
+
+if (o.AccountId == '0014100000BD9op'){
+errorEmailList.add('terrica@synnex.com');
+body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations'; 
+}
+*/
+        }
+        
+        msg.setSubject(sub);
+        msg.setToAddresses(errorEmailList);
+        msg.setPlainTextBody(body);
+        Messaging.sendEmail(new List<Messaging.SingleEmailMessage> { msg }, false);
+    }
+    
+    public static void sendOverdueReminder(){
+        List<AggregateResult> overdue = [SELECT Owner.FirstName, Owner.Email, COUNT(Id) 
+                                         FROM Order 
+                                         WHERE Ready_to_Invoice__c = FALSE 
+                                         AND Invoiced__c = FALSE
+                                         AND Status != 'Canceled'
+                                         //AND Owner.Email != 'salesops@goguardian.com'
+                                         GROUP BY Owner.FirstName, Owner.Email];
+        
+        System.debug('Overdue: '+overdue);
+        
+        if(overdue.size() > 0){
+            List<String> toAddrs = new List<String>();
+            String managers = '';
+            if(Test.isRunningTest()){
+                managers = 'bobbie,lucille';
+            }
+            else{
+                Overdue_Order_Email_Setting__mdt oes = [SELECT Manager_Email__c FROM Overdue_Order_Email_Setting__mdt WHERE Label = 'Default' LIMIT 1];
+                managers = oes.Manager_Email__c;
+            }   
+            
+            for(String name : managers.split(',')){
+                toAddrs.add(name + '@goguardian.com');
+            }
+            
+            for(AggregateResult od : overdue){
+                if(od.get('Email') != Null){
+                    toAddrs.add((String) od.get('Email'));
+                }
+            }
+            
+            String emailBody = 'You are receiving this email because there is at least one overdue order in your name: \n\n';
+            for(AggregateResult od : overdue){
+                String first = (String) od.get('FirstName');
+                Integer	num = (Integer) od.get('expr0');
+                if(first != Null){
+                    emailBody += first + '   ' + String.valueOf(num) + ' order';
+                    
+                    if(num > 1){
+                        emailBody += 's\n';
+                    }
+                    else{
+                        emailBody += '\n';
+                    }
+                }
+            }
+            emailBody += '\n' + 'Orders can be viewed on the Overdue Orders report: ' +
+                'https://goguardian.lightning.force.com/lightning/r/Report/00O41000008cM18EAE/view?queryScope=userFolders' + '\n';
+            
+            
+            
+            Messaging.SingleEmailMessage msg = new Messaging.SingleEmailMessage();
+            msg.setSubject('ACTION NEEDED: There are overdue orders in your name.');
+            msg.setToAddresses(toAddrs);
+            msg.setPlainTextBody(emailBody);
+            
+            Messaging.sendEmail(new List<Messaging.SingleEmailMessage> { msg }, false);
+        }
+    }
+    
+    public static void checkOrderMatch(Order o){
+        
+        List<Id> opportunityIds = new List<ID>();
+        
+        opportunityIds.add(o.OpportunityId);
+        
+        //omitting bundle quote lines  and quotes need to have dates
+        List<SBQQ__QuoteLine__c> quoteLineList = [SELECT Id, SBQQ__Product__c, SBQQ__Quantity__c, SBQQ__NetPrice__c 
+                                                  FROM SBQQ__QuoteLine__c 
+                                                  WHERE SBQQ__Quote__c = :o.Quote__c 
+                                                  AND  SBQQ__RequiredBy__c = NULL 
+                                                  AND SBQQ__Quote__r.SBQQ__StartDate__c != NULL
+                                                  AND SBQQ__Quote__r.SBQQ__EndDate__c != NULL
+                                                  AND Is_Suite__c = FALSE];
+        
+        List<OrderItem> orderItemList = [SELECT Id, Product2Id, Quantity, UnitPrice FROM OrderItem WHERE OrderId = :o.Id];
+        
+        
+        Map<String,Integer> qlCompKeyCounter = new Map<String,Integer>();
+        
+        Map<String,Integer> orderCompKeyCounter = new Map<String,Integer>();
+        
+        for(SBQQ__QuoteLine__c ql : quoteLineList){
+            
+            String qlCompkey = 'Quantity: ' + String.ValueOf(ql.SBQQ__Quantity__c) + 'Product: '+ ql.SBQQ__Product__c +  'Price: ' +String.ValueOf(ql.SBQQ__NetPrice__c);     
+            
+            Integer count = qlCompKeyCounter.containsKey(qlCompkey) ? qlCompKeyCounter.get(qlCompkey) : 0;
+            
+            count++;
+            
+            qlCompKeyCounter.put(qlCompkey,count);
+                
+                }
+        
+        for(OrderItem oi : orderItemList){
+            
+            String orderCompkey = 'Quantity: ' + String.ValueOf(oi.Quantity) + 'Product: '+ oi.Product2Id +  'Price: ' +String.ValueOf(oi.UnitPrice);     
+            
+            Integer count = orderCompKeyCounter.containsKey(orderCompkey) ? orderCompKeyCounter.get(orderCompkey) : 0;
+            
+            count++;
+            
+            orderCompKeyCounter.put(orderCompkey,count);
+            
+            
+        }
+        
+        Boolean mapEquals = qlCompKeyCounter.equals(orderCompKeyCounter);
+        
+        If(mapEquals == TRUE){
+            
+            runIntacctIntegration('Opportunity', opportunityIds, 'Sales Invoice', TRUE);
+            
+            
+        }
+        
+
+        
+        
+    }
+    
+    public static void runIntacctIntegration(String objectType, List<ID> recordIds, String transactionName, Boolean applyOnlyToEmptyTransactions){
+        
+        
+        //ia_crm.SobjectController instance = new ia_crm.SobjectController();
+        
+        //instance.customAction();
+        
+    }
+    
+    
+    
+}
