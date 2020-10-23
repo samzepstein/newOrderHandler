@@ -282,16 +282,24 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
         
         opportunityIds.add(o.OpportunityId);
         
+        ID orderQuoteId = o.SBQQ__Quote__c;
+        
+        System.debug('opportunityIds: ' + opportunityIds);
+        
         //omitting bundle quote lines  and quotes need to have dates
-        List<SBQQ__QuoteLine__c> quoteLineList = [SELECT Id, SBQQ__Product__c, SBQQ__Quantity__c, SBQQ__NetPrice__c 
+        List<SBQQ__QuoteLine__c> quoteLineList = [SELECT Id, SBQQ__Product__c, SBQQ__Quantity__c, SBQQ__ListPrice__c 
                                                   FROM SBQQ__QuoteLine__c 
-                                                  WHERE SBQQ__Quote__c = :o.Quote__c 
-                                                  AND  SBQQ__RequiredBy__c = NULL 
+                                                  WHERE SBQQ__RequiredBy__c = NULL 
+                                                  AND SBQQ__Quote__c = :orderQuoteId
                                                   AND SBQQ__Quote__r.SBQQ__StartDate__c != NULL
                                                   AND SBQQ__Quote__r.SBQQ__EndDate__c != NULL
                                                   AND Is_Suite__c = FALSE];
         
         List<OrderItem> orderItemList = [SELECT Id, Product2Id, Quantity, UnitPrice FROM OrderItem WHERE OrderId = :o.Id];
+        
+        System.debug('quoteLineList: ' + quoteLineList);
+        
+        System.debug('orderItemList: ' + orderItemList);
         
         
         Map<String,Integer> qlCompKeyCounter = new Map<String,Integer>();
@@ -300,15 +308,15 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
         
         for(SBQQ__QuoteLine__c ql : quoteLineList){
             
-            String qlCompkey = 'Quantity: ' + String.ValueOf(ql.SBQQ__Quantity__c) + 'Product: '+ ql.SBQQ__Product__c +  'Price: ' +String.ValueOf(ql.SBQQ__NetPrice__c);     
+            String qlCompkey = 'Quantity: ' + String.ValueOf(ql.SBQQ__Quantity__c) + 'Product: '+ ql.SBQQ__Product__c +  'Price: ' +String.ValueOf(ql.SBQQ__ListPrice__c);     
             
             Integer count = qlCompKeyCounter.containsKey(qlCompkey) ? qlCompKeyCounter.get(qlCompkey) : 0;
             
             count++;
             
             qlCompKeyCounter.put(qlCompkey,count);
-                
-                }
+            
+        }
         
         for(OrderItem oi : orderItemList){
             
@@ -323,28 +331,30 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
             
         }
         
+        System.debug('orderCompKeyCounter: ' + orderCompKeyCounter);
+        
+        System.debug('qlCompKeyCounter: ' + qlCompKeyCounter);
+        
         Boolean mapEquals = qlCompKeyCounter.equals(orderCompKeyCounter);
         
         If(mapEquals == TRUE){
             
-            runIntacctIntegration('Opportunity', opportunityIds, 'Sales Invoice', TRUE);
+            system.debug('Match!');
+            
+            //MAY NEED TO ALSO SYNC CUSTOMER:  https://www.intacct.com/ia/docs/en_US/salesforce/Salesforce/AdvancedCRMIntegration/Customize-Salesforce/SFDC-apex-commands.htm?tocpath=Customize%20Salesforce%7C_____12
+            //ia_crm.SobjectController instance = new ia_crm.SobjectController('Opportunity', opportunityIds, 'Sales Invoice', null);
+            
+            //instance.customAction();
+            
             
             
         }
         
-
+        
         
         
     }
     
-    public static void runIntacctIntegration(String objectType, List<ID> recordIds, String transactionName, Boolean applyOnlyToEmptyTransactions){
-        
-        
-        //ia_crm.SobjectController instance = new ia_crm.SobjectController();
-        
-        //instance.customAction();
-        
-    }
     
     
     
