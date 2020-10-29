@@ -1,0 +1,60 @@
+// Updates a new order with lookups to the quote, opporunity, and the partner rep.
+
+trigger newOrderTrigger on Order (before insert, after insert, after update) {
+    
+    List<Order> orders = Trigger.new;
+    
+    List<Order> oldOrders = Trigger.old;
+    
+    if (Trigger.isBefore && Trigger.isInsert){
+        List<Order> orders = Trigger.new;
+        newOrderHandler.findQuote(orders);
+        newOrderHandler.findRep(orders);
+    }
+    if (Trigger.isAfter && Trigger.isInsert){
+        List<Order> orders = Trigger.new;
+        newOrderHandler.newRep(orders);
+    }
+    
+    if (Trigger.isAfter && Trigger.isUpdate){
+        
+        List<Order> oldOrderList = new List<Order>();
+        
+        for(Order newOrder : orders){
+            
+            for(Order oldOrder : oldOrders){
+                
+                if(newOrder.OpportunityId != oldOrder.OpportunityId && oldOrder.Opportunity_ID__c != NULL){
+                    
+                    system.debug('newOrder.OpportunityId : '+ newOrder.OpportunityId);
+                    
+                    system.debug('oldOrder.OpportunityId : '+ oldOrder.OpportunityId);
+                    
+                    
+                    oldOrderList.add(oldOrder);
+                    
+                    
+                }
+                
+                
+            }
+            
+            newOrderHandler.oppReferenceChanged(oldOrderList);
+            
+            
+            
+            
+            
+            
+        }
+        
+        
+        
+    }
+    
+    
+    
+    
+    
+    
+}
