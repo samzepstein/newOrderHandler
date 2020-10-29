@@ -276,6 +276,105 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
         }
     }
     
+    
+    public static void oppReferenceChanged(List<Order> oldOrderList){
+        
+        List<ID> oldOrderOppList = new List<ID>();
+        
+        for(Order oldOrder : oldOrderList){
+            
+            oldOrderOppList.add(oldOrder.OpportunityId);
+            
+        }
+        
+        system.debug('oldOrderOppList: '+ oldOrderOppList);
+        
+        List<Order> matchingOrders = [Select Id, OpportunityId FROM Order 
+                                      Where OpportunityId IN :oldOrderOppList];
+        
+        system.debug('matchingOrders: ' + matchingOrders);
+        
+        Map<Id,List<Order>> oppOrderMap = new Map<Id,List<Order>>();
+        
+        
+        for(Order o : matchingOrders){
+            
+            Id orderOppId = o.OpportunityId;
+                
+                List<Order> orderList = oppOrderMap.containsKey(orderOppId) ? oppOrderMap.get(orderOppId) : new List<Order>();
+            
+            orderList.add(o);
+            
+            oppOrderMap.put(orderOppId, orderList);
+            
+        }
+        
+        system.debug('oppOrderMap: ' + oppOrderMap);
+        
+        List<Opportunity> oppList = [Select Id,  PO_number__c, Has_Order__c FROM Opportunity WHERE Id IN :oldOrderOppList];
+        
+        
+        
+        system.debug('oppList: ' + oppList);
+        
+        
+        for(Opportunity opp : oppList){
+            
+            Id oppId = opp.id;
+                
+                List<Order> foundOrders = oppOrderMap.containsKey(oppId) ? oppOrderMap.get(oppId) : new List<Order>();
+            
+            
+            If(foundOrders.size() == 1 ){
+                
+                opp.PO_number__c = foundOrders[0].PoNumber;
+            }
+            
+            If(foundOrders.size() > 1 ){
+                
+                List<String> orderUrls = new List<String>();
+                
+                for(Order o : foundOrders){
+                    
+                    orderUrls.add(o.Name + ' ' + 'https://goguardian.lightning.force.com/lightning/r/Lead/'+ o.Id+'/view\n');
+                    
+                }
+                
+                //send email to salesops
+                String subject = 'Found Multiple Orders';
+                String body = 'Hey, ' + 
+                    '\n\nYou marked a lead as open pipeline that doesn’t have any open opportunities attached.  '  +
+                    '\n\nCan you please fix it? Here is the lead record: '+
+                    '\nOrder Urls:' +
+                    orderUrls +
+                    '\n\nThanks!';
+                
+                String address = 'salesops@goguardian.com';
+                
+                sendEmail(subject, body, address);
+                
+            }
+            
+            
+            Else{
+                
+                opp.Has_Order__c = FALSE;
+                opp.PO_number__c = '';
+                system.debug('yay!!');
+            }
+            
+            
+        }
+        
+        update oppList;
+        
+        
+        
+    }
+    
+    
+    
+    //check if order products matcch quote lines to auto-create sales invoice in intacct
     public static void checkOrderMatch(Order o){
         
         List<Id> opportunityIds = new List<ID>();
@@ -356,6 +455,32 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
     }
     
     
+    public static void errorHandler(String sub, String body){
+        
+        List<String> errorEmailList = new List<String>{'salesops@goguardian.com'};
+            Messaging.SingleEmailMessage msg = new Messaging.SingleEmailMessage();
+        
+        msg.setSubject(sub);
+        msg.setToAddresses(errorEmailList);
+        msg.setPlainTextBody(body);
+        Messaging.sendEmail(new List<Messaging.SingleEmailMessage> { msg }, false);
+        
+    }
     
+    public static void sendEmail(String subject, String body, String address){
+        
+        List<String> emailList = new List<String>{address};
+            Messaging.SingleEmailMessage msg = new Messaging.SingleEmailMessage();
+        
+        msg.setSubject(subject);
+        msg.setToAddresses(emailList);
+        msg.setPlainTextBody(body);
+        Messaging.sendEmail(new List<Messaging.SingleEmailMessage> { msg }, false);
+        
+        
+        
+        
+        
+    }
     
 }
