@@ -90,7 +90,8 @@ public class newOrderHandler{
                         o.OpportunityId = quote.SBQQ__Opportunity2__c;
                         
                         //run method to chedk order to match quote lines to create sales invoice in Intacct
-                        checkOrderMatch(o);
+                        
+                        //checkOrderMatch(o);
                         
                         
                         
@@ -289,7 +290,7 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
         
         system.debug('oldOrderOppList: '+ oldOrderOppList);
         
-        List<Order> matchingOrders = [Select Id, OpportunityId FROM Order 
+        List<Order> matchingOrders = [Select Id, Name, PoNumber, OpportunityId FROM Order 
                                       Where OpportunityId IN :oldOrderOppList];
         
         system.debug('matchingOrders: ' + matchingOrders);
@@ -300,8 +301,8 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
         for(Order o : matchingOrders){
             
             Id orderOppId = o.OpportunityId;
-                
-                List<Order> orderList = oppOrderMap.containsKey(orderOppId) ? oppOrderMap.get(orderOppId) : new List<Order>();
+            
+            List<Order> orderList = oppOrderMap.containsKey(orderOppId) ? oppOrderMap.get(orderOppId) : new List<Order>();
             
             orderList.add(o);
             
@@ -311,62 +312,77 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
         
         system.debug('oppOrderMap: ' + oppOrderMap);
         
-        List<Opportunity> oppList = [Select Id,  PO_number__c, Has_Order__c FROM Opportunity WHERE Id IN :oldOrderOppList];
+        List<Opportunity> oppList = [Select Id, PO_number__c, Has_Order__c FROM Opportunity WHERE Id IN :oldOrderOppList];
         
         
         
         system.debug('oppList: ' + oppList);
         
-        
-        for(Opportunity opp : oppList){
+        try{
             
-            Id oppId = opp.id;
+            
+            for(Opportunity opp : oppList){
+                
+                Id oppId = opp.id;
+                
+                system.debug('oppId: '+ oppId);
                 
                 List<Order> foundOrders = oppOrderMap.containsKey(oppId) ? oppOrderMap.get(oppId) : new List<Order>();
-            
-            
-            If(foundOrders.size() == 1 ){
                 
-                opp.PO_number__c = foundOrders[0].PoNumber;
-            }
-            
-            If(foundOrders.size() > 1 ){
+                system.debug('foundOrders: '+ foundOrders);
                 
-                List<String> orderUrls = new List<String>();
-                
-                for(Order o : foundOrders){
+                If(foundOrders.size() == 1 ){
                     
-                    orderUrls.add(o.Name + ' ' + 'https://goguardian.lightning.force.com/lightning/r/Lead/'+ o.Id+'/view\n');
+                    opp.PO_number__c = foundOrders[0].PoNumber;
+                    
+                    system.debug('found another order');
+                }
+                
+                If(foundOrders.size() > 1 ){
+                    
+                    List<String> orderUrls = new List<String>();
+                    
+                    for(Order o : foundOrders){
+                        
+                        orderUrls.add(o.Name + '\n' + 'https://goguardian.lightning.force.com/lightning/r/Lead/'+ o.Id+'/view\n\n');
+                        
+                    }
+                    
+                    //send email to salesops
+                    String subject = 'Found Multiple Orders';
+                    String body = 'Hey, ' + 
+                        '\n\nWe found multiple orrders after an opp has been disacociated with an order.  '  +
+                        '\n\nFor thhat reason, we did not uncheck the Has_Order__c field: '+
+                        '\n\nOrder Urls:' + '\n' +
+                        orderUrls +
+                        '\n\nThanks!';
+                    
+                    String address = 'salesops@goguardian.com';
+                    
+                    sendEmail(subject, body, address);
                     
                 }
                 
-                //send email to salesops
-                String subject = 'Found Multiple Orders';
-                String body = 'Hey, ' + 
-                    '\n\nYou marked a lead as open pipeline that doesn’t have any open opportunities attached.  '  +
-                    '\n\nCan you please fix it? Here is the lead record: '+
-                    '\nOrder Urls:' +
-                    orderUrls +
-                    '\n\nThanks!';
                 
-                String address = 'salesops@goguardian.com';
+                If(foundOrders.size() == 0 ){
+                    
+                    opp.Has_Order__c = FALSE;
+                    opp.PO_number__c = '';
+                    system.debug('yay!!');
+                }
                 
-                sendEmail(subject, body, address);
                 
             }
             
             
-            Else{
-                
-                opp.Has_Order__c = FALSE;
-                opp.PO_number__c = '';
-                system.debug('yay!!');
-            }
-            
+            update oppList;
             
         }
-        
-        update oppList;
+        catch(Exception e){
+            String sub4 = 'Exception Thrown - Error with oppReferenceChanged Method';
+            String body4 = 'Exception thrown' + e.getMessage() + 'Stack Trace: ' + e.getStackTraceString();
+            errorHandler(sub4,body4);
+        }
         
         
         
@@ -375,6 +391,9 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
     
     
     //check if order products matcch quote lines to auto-create sales invoice in intacct
+    //
+    
+/*
     public static void checkOrderMatch(Order o){
         
         List<Id> opportunityIds = new List<ID>();
@@ -453,6 +472,7 @@ body = 'Attn: Terri Carter,\n\n' + body + '\n\n GoGuardian Sales Operations';
         
         
     }
+*/
     
     
     public static void errorHandler(String sub, String body){
