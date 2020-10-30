@@ -39,13 +39,13 @@ trigger newOrderTrigger on Order (before insert, after insert, after update) {
                 
             }
             
+            
+            
+        }
+        
+        If(oldOrderList.size() > 0){
+            
             newOrderHandler.oppReferenceChanged(oldOrderList);
-            
-            
-            
-            
-            
-            
         }
         
         
