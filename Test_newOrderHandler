@@ -1,0 +1,353 @@
+@isTest
+public class Test_newOrderHandler {
+    @testSetup static void setupTest(){
+        
+        List<Account> accountList = new List<Account>();
+        
+        Account reseller = new Account(Name='Test Reseller');
+        accountList.add(reseller);
+        
+        Account testAcct = new Account(Name='Test Account');
+        accountList.add(testAcct);
+        
+        insert accountList;
+        
+        User u = [SELECT Id FROM User LIMIT 1];
+        
+        Opportunity testOpp = new Opportunity(Name='Test Opportunity',
+                                              CloseDate = system.today(),
+                                              StageName = 'Closing',
+                                              Type = 'New',
+                                              Channel__c = 'Indirect',
+                                              QuotePrimaryPartner__c = reseller.Id,
+                                              AccountId=testAcct.Id,
+                                              OwnerId = u.Id);
+        insert testOpp;
+        
+        System.debug('Channel: '+ [SELECT ID, Channel__c, QuotePrimaryPartner__c, PrimaryDistributor__c FROM Opportunity WHERE ID = :testOpp.Id]);
+        
+        SBQQ__Quote__c testQuote = new SBQQ__Quote__c(SBQQ__Opportunity2__c = testOpp.Id,
+                                                      SBQQ__Account__c=testAcct.Id,
+                                                      SBQQ__Partner__c=reseller.Id,
+                                                      SBQQ__Primary__c = True);
+        SBQQ.TriggerControl.disable();
+        insert testQuote;
+        SBQQ.TriggerControl.enable();
+        
+        Test.startTest();
+        
+        SBQQ__Quote__c qte = [SELECT Name FROM SBQQ__Quote__c WHERE SBQQ__Partner__c = :reseller.Id];
+        
+        Order testOrder0 = new Order(Quote__c = qte.Name,
+                                     PartnerRep_Email__c = 'newOrderHandler@test.com',
+                                     PartnerRep_Name__c = 'NewOrder Handler',
+                                     AccountId = reseller.Id,
+                                     EffectiveDate = system.today(),
+                                     Status = 'Draft',
+                                     PoNumber = 'testPoNumber');
+        insert testOrder0;
+        
+        Pricing_Letter__c pricingLetter = new Pricing_Letter__c(Account__c=testAcct.Id,
+                                                                Expiration_Date__c = System.today().addYears(1),
+                                                                Effective_Date__c = System.today());
+        
+        insert pricingLetter;
+        
+        Test.stopTest();
+    }
+    
+    static testMethod void error1_newOrderTest(){        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        Order testOrder = new Order(Quote__c = 'Q-Error',
+                                    PartnerRep_Email__c = 'newOrderHandler@test.com',
+                                    PartnerRep_Name__c = 'NewOrder Handler',
+                                    AccountId = testReseller.Id,
+                                    EffectiveDate = system.today(),
+                                    Status = 'Draft');
+        insert testOrder;
+        
+        Test.startTest();
+        Test.stopTest();
+    }
+    
+    static testMethod void error2_newOrderTest(){        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        SBQQ__Quote__c qte = [SELECT Name FROM SBQQ__Quote__c WHERE SBQQ__Partner__c = :testReseller.Id];
+        
+        Order testOrder2 = new Order(Quote__c = qte.Name,
+                                     PartnerRep_Email__c = 'newOrderHandler@test.com',
+                                     PartnerRep_Name__c = 'NewOrder Handler',
+                                     AccountId = testReseller.Id,
+                                     EffectiveDate = system.today(),
+                                     Status = 'Draft');
+        insert testOrder2;
+        
+        Test.startTest();
+        Test.stopTest();
+        
+    }
+    
+    static testMethod void error3_newOrderTest(){        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        Order testOrder3 = new Order(Quote__c = 'TestQuote3',
+                                     PartnerRep_Email__c = 'newOrderHandler@test.com',
+                                     PartnerRep_Name__c = 'NewOrder Handler',
+                                     AccountId = testReseller.Id,
+                                     EffectiveDate = system.today(),
+                                     Status = 'Draft',
+                                     PoNumber = 'testPoNumber');
+        insert testOrder3;
+        
+        Test.startTest();
+        Test.stopTest();
+        
+        Order query_to3 = [SELECT Id, Status FROM Order WHERE Id = :testOrder3.Id];
+        
+        System.assertEquals('Canceled', query_to3.Status);
+        
+    }
+    
+    static testMethod void newOrderTest(){
+        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        SBQQ__Quote__c qte = [SELECT Name FROM SBQQ__Quote__c WHERE SBQQ__Partner__c = :testReseller.Id];
+        
+        // Clear the database of duplicate orders.
+        List<Order> delOrder = [SELECT Id FROM Order WHERE Quote__c = :qte.Name];
+        delete delOrder;
+        
+        Order testOrder3 = new Order(Quote__c = qte.Name,
+                                     PartnerRep_Email__c = 'newOrderHandler@test.com',
+                                     PartnerRep_Name__c = 'NewOrder Handler',
+                                     Drop_Ship_Name__c = 'Test Testerson',
+                                     Drop_Ship_Email__c = 'test@testerson.com',
+                                     AccountId = testReseller.Id,
+                                     EffectiveDate = system.today(),
+                                     Status = 'Draft');
+        insert testOrder3;
+        
+        Test.startTest();
+        Test.stopTest();
+        
+        
+        Order assertOrder = [SELECT OwnerId, SBQQ__Quote__c, Partner_Rep__c FROM Order WHERE Id = :testOrder3.Id LIMIT 1];
+        
+        Boolean repBool = assertOrder.Partner_Rep__c != null ? True : False;
+        
+        system.debug('Expected: ' +qte.Id);
+        system.debug('Actual: ' +assertOrder.SBQQ__Quote__c);
+        
+        System.assertEquals(qte.Id, assertOrder.SBQQ__Quote__c); 
+        System.assertEquals(True, repBool);
+        
+        System.debug('Owner: '+assertOrder.OwnerId);
+        
+        List<Order> overdue = [SELECT Owner.FirstName, Owner.Email 
+                               FROM Order 
+                               WHERE Ready_to_Invoice__c = FALSE 
+                               AND Invoiced__c = FALSE
+                               AND Status != 'Canceled'];
+        
+        System.debug('Overdue 1: '+overdue);
+        
+        List<Order> allOrders = [SELECT Ready_to_Invoice__c, Invoiced__c, Status, Owner.Email, Owner.FirstName FROM Order];
+        
+        System.debug(allOrders);        
+        
+        newOrderHandler.sendOverdueReminder();
+    }
+    
+    static testMethod void pricing_Letter_newOrderTest(){
+        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        Pricing_Letter__c pricingletter = [SELECT Account__r.OwnerId, Name FROM Pricing_Letter__c LIMIT 1];
+        
+        // Clear the database of duplicate orders.
+        List<Order> delOrder = [SELECT Id FROM Order WHERE Quote__c = :pricingletter.Name];
+        delete delOrder;
+        
+        Order testOrder3 = new Order(Quote__c = pricingletter.Name,
+                                     PartnerRep_Email__c = 'newOrderHandler@test.com',
+                                     PartnerRep_Name__c = 'NewOrder Handler',
+                                     Drop_Ship_Name__c = 'Test Testerson',
+                                     Drop_Ship_Email__c = 'test@testerson.com',
+                                     AccountId = testReseller.Id,
+                                     EffectiveDate = system.today(),
+                                     Status = 'Draft');
+        insert testOrder3;
+        
+        Test.startTest();
+        Test.stopTest();
+        
+        
+        Order assertOrder = [SELECT OwnerId, SBQQ__Quote__c, Partner_Rep__c FROM Order WHERE Id = :testOrder3.Id LIMIT 1];
+        
+        System.assertEquals(pricingLetter.Account__r.OwnerId,assertOrder.OwnerId);
+        
+        List<Order> overdue = [SELECT Owner.FirstName, Owner.Email 
+                               FROM Order 
+                               WHERE Ready_to_Invoice__c = FALSE 
+                               AND Invoiced__c = FALSE
+                               AND Status != 'Canceled'];
+        
+        System.debug('Overdue 1: '+overdue);
+        
+        List<Order> allOrders = [SELECT Ready_to_Invoice__c, Invoiced__c, Status, Owner.Email, Owner.FirstName FROM Order];
+        
+        System.debug(allOrders);        
+        
+        newOrderHandler.sendOverdueReminder();
+    }
+    
+    static testMethod void oppReferenceChangedNoOtherOrders(){
+        
+        test.startTest();
+        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        Opportunity opp = new Opportunity(Name = 'test opp', PO_number__c = '342342324', CloseDate = system.today(),
+                                          StageName = 'Closing',
+                                          Type = 'New',
+                                          AccountId = testReseller.id);
+        
+        insert opp;
+        
+        Order testOrder3 = [SELECT ID, PoNumber FROM Order Where PoNumber = 'testPoNumber' LIMIT 1];
+        
+        testOrder3.OpportunityId = opp.id;
+        
+        update testOrder3;
+        
+        testOrder3.OpportunityId = NULL;
+        
+        update testOrder3;
+        
+        test.stopTest();
+        
+        
+        
+    }
+    
+    
+    static testMethod void oppReferenceChangedOneOtherOrder(){
+        
+        
+        test.startTest();
+        
+        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        Opportunity opp = new Opportunity(Name = 'test opp', PO_number__c = '342342324', CloseDate = system.today(),
+                                          StageName = 'Closing',
+                                          Type = 'New',
+                                          AccountId = testReseller.id);
+        
+        insert opp;
+        
+        Order testOrder3 = [SELECT ID, PoNumber FROM Order Where PoNumber = 'testPoNumber' LIMIT 1];
+        
+        
+        Order testOrder2 = new Order(
+            PartnerRep_Email__c = 'newOrderHandler@test.com',
+            PartnerRep_Name__c = 'NewOrder Handler',
+            Drop_Ship_Name__c = 'Test Testerson',
+            Drop_Ship_Email__c = 'test@testerson.com',
+            OpportunityId =  opp.id,
+            EffectiveDate = system.today(),
+            AccountId = testReseller.Id,
+            Status = 'Draft');
+        
+        
+        
+        insert testOrder2;
+        
+        testOrder3.OpportunityId = opp.id;
+        
+        update testOrder3;
+        
+        testOrder3.OpportunityId = NULL;
+        
+        update testOrder3;
+        
+        test.stopTest();
+        
+        
+        
+    }
+    
+    static testMethod void oppReferenceChangedMoreThanOneOtherOrder(){
+        
+        
+        test.startTest();
+        
+        List<Order> orderList = new List<Order>();
+        
+        Account testReseller = [SELECT Id FROM Account WHERE Name = 'Test Reseller' LIMIT 1];
+        
+        
+        Opportunity opp = [SELECT ID, PO_number__c, Has_Order__c FROM Opportunity WHERE Name = 'Test Opportunity'];
+        
+        Order testOrder2 = new Order(
+            PartnerRep_Email__c = 'newOrderHandler@test.com',
+            PartnerRep_Name__c = 'NewOrder Handler',
+            Drop_Ship_Name__c = 'Test Testerson',
+            Drop_Ship_Email__c = 'test@testerson.com',
+            OpportunityId =  opp.id,
+            EffectiveDate = system.today(),
+            AccountId = testReseller.Id,
+            Status = 'Draft');
+        
+        orderList.add(testOrder2);
+        
+        
+        Order testOrder3 = new Order(
+            PartnerRep_Email__c = 'newOrderHandler@test.com',
+            PartnerRep_Name__c = 'NewOrder Handler',
+            Drop_Ship_Name__c = 'Test Testerson',
+            Drop_Ship_Email__c = 'test@testerson.com',
+            OpportunityId =  opp.id,
+            EffectiveDate = system.today(),
+            AccountId = testReseller.Id,
+            Status = 'Draft');
+        
+        orderList.add(testOrder3);
+        
+        Order testOrder4 = new Order(
+            PartnerRep_Email__c = 'newOrderHandler@test.com',
+            PartnerRep_Name__c = 'NewOrder Handler',
+            Drop_Ship_Name__c = 'Test Testerson',
+            Drop_Ship_Email__c = 'test@testerson.com',
+            OpportunityId =  opp.id,
+            EffectiveDate = system.today(),
+            AccountId = testReseller.Id,
+            Status = 'Draft');
+        
+        orderList.add(testOrder4);
+        
+        
+        insert orderList;
+        
+        
+        testOrder3.OpportunityId = NULL;
+        
+        update testOrder3;
+        
+        test.stopTest();
+        
+        
+    }
+    
+    
+    
+    
+    /*    
+static testMethod void overdueOrderTest(){
+newOrderHandler.sendOverdueReminder();
+}
+*/
+}
