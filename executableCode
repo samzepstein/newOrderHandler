@@ -1,0 +1,24 @@
+Account testAccount = [Select ID from Account WHERE Name = 'INTACCT 2 Test SAM ACCOUNT' LIMIT 1];      
+
+Opportunity oppty2 = [Select ID, AccountId from Opportunity WHERE Name = 'INTACCT 2 SAM Test oppty' LIMIT 1];  
+
+SBQQ__Quote__c quote = [Select ID, Name FROM SBQQ__Quote__c WHERE ID = 'a0j2i000000RRKmAAO'];
+
+Order myOrder = new Order(Quote__c = quote.Name, AccountId = testAccount.Id,OpportunityId = oppty2.id, EffectiveDate = system.today(),
+                             Status = 'Draft', Pricebook2Id = '01s41000003wyHzAAI' );
+
+insert myOrder;
+
+List<OrderItem> orderItemList = new List<OrderItem>();
+
+//admin
+OrderItem orderItem1 = new OrderItem( Product2Id = '01t41000000gS9OAAU', Quantity = 10, OrderId =  myOrder.id, PricebookEntryId = '01u41000000qbU9AAI', UnitPrice = 7.50);
+
+orderItemList.add(orderItem1);
+
+//teacher
+OrderItem orderItem2 = new OrderItem( Product2Id = '01t41000000gS9YAAU', Quantity = 10, OrderId =  myOrder.id, PricebookEntryId = '01u41000000qbUTAAY', UnitPrice = 7.50);
+
+orderItemList.add(orderItem2);
+
+Insert orderItemList;
