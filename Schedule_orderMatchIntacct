@@ -1,9 +1,9 @@
 global class orderMatchIntacct implements Schedulable {
     
     //check if order products matcch quote lines to auto-create sales invoice in intacct
-    public static void execute(SchedulableContext SC){
+    public void execute(SchedulableContext SC){
         
-        List<Order> orderList = [SELECT ID, Name, OpportunityId, Running_Intacct_Sync__c FROM Order WHERE Running_Intacct_Sync__c = TRUE];
+        List<Order> orderList = [SELECT ID, Name, OpportunityId, Partner_Rep__c, AccountId, SBQQ__Quote__c, Running_Intacct_Sync__c FROM Order WHERE Running_Intacct_Sync__c = TRUE];
         
         List<Order> updateOrderList = new List<Order>();
         
@@ -11,7 +11,19 @@ global class orderMatchIntacct implements Schedulable {
             
             List<Id> opportunityIds = new List<ID>();
             
+            List<Id> contactIds = new List<ID>();
+            
+            List<Id> accountIds = new List<ID>();
+            
             opportunityIds.add(o.OpportunityId);
+            
+            contactIds.add(o.Partner_Rep__c);
+            
+            accountIds.add(o.AccountId);
+            
+            System.debug('contactIds : ' + contactIds);
+            
+            System.debug('accountIds : ' + accountIds);
             
             ID orderQuoteId = o.SBQQ__Quote__c;
             
@@ -20,7 +32,7 @@ global class orderMatchIntacct implements Schedulable {
             System.debug('opportunityIds: ' + opportunityIds);
             
             //omitting bundle quote lines  and quotes need to have dates
-            List<SBQQ__QuoteLine__c> quoteLineList = [SELECT Id, SBQQ__Product__c, SBQQ__Quantity__c, SBQQ__ListPrice__c 
+            List<SBQQ__QuoteLine__c> quoteLineList = [SELECT Id, SBQQ__Product__c, SBQQ__Quantity__c, SBQQ__ListPrice__c, SBQQ__Quote__c 
                                                       FROM SBQQ__QuoteLine__c 
                                                       WHERE SBQQ__RequiredBy__c = NULL 
                                                       AND SBQQ__Quote__c = :orderQuoteId
@@ -75,9 +87,22 @@ global class orderMatchIntacct implements Schedulable {
                 system.debug('Match!');
                 
                 //MAY NEED TO ALSO SYNC CUSTOMER:  https://www.intacct.com/ia/docs/en_US/salesforce/Salesforce/AdvancedCRMIntegration/Customize-Salesforce/SFDC-apex-commands.htm?tocpath=Customize%20Salesforce%7C_____12
-                ia_crm.SobjectController instance = new ia_crm.SobjectController('Opportunity', opportunityIds, 'Sales Invoice', null);
                 
-                instance.customAction();
+                
+                //sync account
+                ia_crm.SobjectController instance1 = new ia_crm.SobjectController('Account', accountIds, 'SYNC_CUSTOMER', null);
+                
+                //sync  contact
+                ia_crm.SobjectController instance2 = new ia_crm.SobjectController('Contact', contactIds, 'SYNC_CONTACT', null);
+                
+                //sync opp
+                ia_crm.SobjectController instance3 = new ia_crm.SobjectController('Opportunity', opportunityIds, 'Sales Invoice', null);
+                
+                instance1.customAction();
+                
+                instance2.customAction();
+                
+                instance3.customAction();
                 
                 
                 
