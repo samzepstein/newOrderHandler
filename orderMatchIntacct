@@ -1,0 +1,149 @@
+global class orderMatchIntacct implements Schedulable {
+    
+    //check if order products matcch quote lines to auto-create sales invoice in intacct
+    public void execute(SchedulableContext SC){
+        
+        List<Order> orderList = [SELECT ID, Name, OpportunityId, Partner_Rep__c, AccountId, SBQQ__Quote__c, Running_Intacct_Sync__c FROM Order WHERE Running_Intacct_Sync__c = TRUE];
+        
+        List<Order> updateOrderList = new List<Order>();
+        
+        for(Order o : orderList){
+            
+            List<Id> opportunityIds = new List<ID>();
+            
+            
+            List<Id> contactIds = new List<ID>();
+            
+            List<Id> accountIds = new List<ID>();
+            
+            opportunityIds.add(o.OpportunityId);
+            
+            contactIds.add(o.Partner_Rep__c);
+            
+            accountIds.add(o.AccountId);
+            
+            
+            
+            
+            
+            System.debug('contactIds : ' + contactIds);
+            
+            System.debug('accountIds : ' + accountIds);
+            
+            ID orderQuoteId = o.SBQQ__Quote__c;
+            
+            System.debug('orderQuoteId : ' + orderQuoteId);
+            
+            System.debug('opportunityIds: ' + opportunityIds);
+            
+            //omitting bundle quote lines  and quotes need to have dates
+            List<SBQQ__QuoteLine__c> quoteLineList = [SELECT Id, SBQQ__Product__c, SBQQ__Quantity__c, SBQQ__ListPrice__c, SBQQ__Quote__c 
+                                                      FROM SBQQ__QuoteLine__c 
+                                                      WHERE SBQQ__RequiredBy__c = NULL 
+                                                      AND SBQQ__Quote__c = :orderQuoteId
+                                                      AND SBQQ__Quote__r.SBQQ__StartDate__c != NULL
+                                                      AND SBQQ__Quote__r.SBQQ__EndDate__c != NULL
+                                                      AND Is_Suite__c = FALSE];
+            
+            List<OrderItem> orderItemList = [SELECT Id, Product2Id, Quantity, UnitPrice FROM OrderItem WHERE OrderId = :o.Id];
+            
+            System.debug('quoteLineList: ' + quoteLineList);
+            
+            System.debug('orderItemList: ' + orderItemList);
+            
+            
+            Map<String,Integer> qlCompKeyCounter = new Map<String,Integer>();
+            
+            Map<String,Integer> orderCompKeyCounter = new Map<String,Integer>();
+            
+            for(SBQQ__QuoteLine__c ql : quoteLineList){
+                
+                String qlCompkey = 'Quantity: ' + String.ValueOf(ql.SBQQ__Quantity__c) + 'Product: '+ ql.SBQQ__Product__c +  'Price: ' +String.ValueOf(ql.SBQQ__ListPrice__c);     
+                
+                Integer count = qlCompKeyCounter.containsKey(qlCompkey) ? qlCompKeyCounter.get(qlCompkey) : 0;
+                
+                count++;
+                
+                qlCompKeyCounter.put(qlCompkey,count);
+                
+            }
+            
+            for(OrderItem oi : orderItemList){
+                
+                String orderCompkey = 'Quantity: ' + String.ValueOf(oi.Quantity) + 'Product: '+ oi.Product2Id +  'Price: ' +String.ValueOf(oi.UnitPrice);     
+                
+                Integer count = orderCompKeyCounter.containsKey(orderCompkey) ? orderCompKeyCounter.get(orderCompkey) : 0;
+                
+                count++;
+                
+                orderCompKeyCounter.put(orderCompkey,count);
+                
+                
+            }
+            
+            
+            
+            System.debug('orderCompKeyCounter: ' + orderCompKeyCounter);
+            
+            System.debug('qlCompKeyCounter: ' + qlCompKeyCounter);
+            
+            Boolean mapEquals = qlCompKeyCounter.equals(orderCompKeyCounter);
+            
+            List<Opportunity> oppList = [SELECT ID, ia_crm__Sync_With_Intacct__c FROM Opportunity WHERE Id in :opportunityIds];
+            
+            system.debug('oppList: '+ oppList);
+            
+            If(mapEquals == TRUE){
+                
+                
+                
+                for(Opportunity opp : oppList){
+                    
+                    system.debug('oppId: ' + opp.id);
+                    
+                    system.debug('Match!');
+                    
+                    opp.ia_crm__Sync_With_Intacct__c = TRUE;
+                    
+                }
+                
+                
+                
+                
+                
+                //MAY NEED TO ALSO SYNC CUSTOMER:  https://www.intacct.com/ia/docs/en_US/salesforce/Salesforce/AdvancedCRMIntegration/Customize-Salesforce/SFDC-apex-commands.htm?tocpath=Customize%20Salesforce%7C_____12
+                
+                /*
+
+//sync account
+ia_crm.SobjectController instance1 = new ia_crm.SobjectController('Account', accountIds, 'SYNC_CUSTOMER', null);
+
+//sync  contact
+ia_crm.SobjectController instance2 = new ia_crm.SobjectController('Contact', contactIds, 'SYNC_CONTACT', null);
+
+//sync opp
+ia_crm.SobjectController instance3 = new ia_crm.SobjectController(opportunityIds, 'Sales Invoice', FALSE);
+
+instance1.customAction();
+
+instance2.customAction();
+
+instance3.customAction();
+*/
+                
+                
+            }
+            
+            o.Running_Intacct_Sync__c = FALSE;
+            updateOrderList.add(o);
+            update oppList;
+            
+            
+        }
+        
+        update updateOrderList;
+        
+    }
+    
+    
+}
